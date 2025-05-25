@@ -93,8 +93,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request for NewMethodProxy.')
 
     # Route dispatch
-    path = req.route_params.get('path', '')
-    if path == 'tower-snippet':
+    subroute = req.route_params.get('subroute', '')
+    if subroute == 'tower-snippet':
         return tower_snippet(req)
 
     AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
