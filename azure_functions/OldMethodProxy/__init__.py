@@ -6,6 +6,7 @@ from azure.data.tables import TableServiceClient, UpdateMode
 from datetime import datetime, timedelta
 from openai import AzureOpenAI
 import re
+import traceback
 
 RATE_LIMIT = 10  # max requests
 WINDOW_SECONDS = 60 * 3  # per 3 minutes
@@ -67,45 +68,48 @@ def is_rate_limited(ip: str) -> bool:
         return False
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info('Entered main() for OldMethodProxy')
     ip = req.headers.get('X-Forwarded-For', req.headers.get('X-Client-IP', req.remote_addr))
-    if is_rate_limited(ip):
-        return func.HttpResponse("Too many requests. Please slow down.", status_code=429)
+    logging.info(f'Received request from IP: {ip}')
+    try:
+        if is_rate_limited(ip):
+            logging.warning(f'Rate limit exceeded for IP: {ip}')
+            return func.HttpResponse("Too many requests. Please slow down.", status_code=429)
+    except Exception as e:
+        logging.error("Exception in rate limiting", exc_info=True)
+        return func.HttpResponse(f"Error: {str(e)}", status_code=500)
     logging.info('Python HTTP trigger function processed a request for OldMethodProxy.')
-
     # Route dispatch
     subroute = req.route_params.get('subroute', '')
+    logging.info(f'Route subroute: {subroute}')
     if subroute == 'tower-snippet':
         return tower_snippet(req)
-
     AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
     AZURE_OPENAI_API_KEY = os.environ.get("AZURE_OPENAI_API_KEY")
     AZURE_OPENAI_DEPLOYMENT_NAME = os.environ.get("AZURE_DEPLOYMENT_NAME", "gpt-4o")
     AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
-
     if not (AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY):
+        logging.error("OpenAI service is not configured.")
         return func.HttpResponse("OpenAI service is not configured.", status_code=500)
-
     client = AzureOpenAI(
         azure_endpoint=AZURE_OPENAI_ENDPOINT,
         api_key=AZURE_OPENAI_API_KEY,
         api_version=AZURE_OPENAI_API_VERSION
     )
-
     try:
         req_body = req.get_json()
-    except ValueError:
+    except Exception as e:
+        logging.error("Failed to parse JSON body", exc_info=True)
         return func.HttpResponse("Please pass a valid JSON object in the request body", status_code=400)
-
     messages = req_body.get('messages')
     type_ = req_body.get('type', 'chat')
     if not messages:
+        logging.error("Missing 'messages' in request body")
         return func.HttpResponse("Please pass 'messages' in the request body", status_code=400)
-
     system_prompt = SYSTEM_PROMPTS.get(type_, SYSTEM_PROMPTS["chat"])
     if not isinstance(messages, list):
         messages = [{"role": "user", "content": str(messages)}]
     full_messages = [system_prompt] + messages
-
     try:
         response = client.chat.completions.create(
             model=AZURE_OPENAI_DEPLOYMENT_NAME,
@@ -117,9 +121,10 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             presence_penalty=0
         )
         ai_response = response.choices[0].message
+        logging.info('OpenAI call successful')
         return func.HttpResponse(json.dumps({"response": ai_response}), mimetype="application/json")
     except Exception as e:
-        logging.error(f"Error calling Azure OpenAI: {str(e)}")
+        logging.error("Error calling Azure OpenAI", exc_info=True)
         return func.HttpResponse(f"Error processing your request with AI assistant: {str(e)}", status_code=500)
 
 def extract_snippet(response_text):
@@ -131,14 +136,17 @@ def extract_snippet(response_text):
     return '\n'.join(lines).strip()
 
 def tower_snippet(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info('Entered tower_snippet() for OldMethodProxy')
     try:
         req_body = req.get_json()
-    except ValueError:
+    except Exception as e:
+        logging.error("Failed to parse JSON body in tower_snippet", exc_info=True)
         return func.HttpResponse("Please pass a valid JSON object in the request body", status_code=400)
     context = req_body.get('context', {})
     tower_type = req_body.get('towerType')
     user_info = req_body.get('userInfo', {})
     if not tower_type or not context:
+        logging.error("Missing 'context' or 'towerType' in tower_snippet request body")
         return func.HttpResponse("Please pass 'context' and 'towerType' in the request body", status_code=400)
     user_prompt = f"Generate a code snippet for a {tower_type} in {context.get('language', 'Python')} that fits into the following code context:\n\nPROBLEM DESCRIPTION:\n{context.get('problem', 'No problem description available')}\n\nEXISTING CODE:\n{context.get('code', '// No code available')}\n\nThe snippet should:\n1. Use variable names and styles consistent with existing code\n2. Contribute meaningfully to solving the specific problem\n3. Follow proper indentation and code style\n4. Be compact yet functional\n5. Not duplicate existing functionality\n6. Be appropriate for a {tower_type} (e.g., a loop, condition, etc.)\n7. If this is tower number {context.get('towerCount', 1)} of this type, use appropriate naming.\n\nReturn only the code snippet without explanations or markdown formatting."
     AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
@@ -146,6 +154,7 @@ def tower_snippet(req: func.HttpRequest) -> func.HttpResponse:
     AZURE_OPENAI_DEPLOYMENT_NAME = os.environ.get("AZURE_DEPLOYMENT_NAME", "gpt-4o")
     AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
     if not (AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY):
+        logging.error("OpenAI service is not configured in tower_snippet.")
         return func.HttpResponse("OpenAI service is not configured.", status_code=500)
     client = AzureOpenAI(
         azure_endpoint=AZURE_OPENAI_ENDPOINT,
@@ -164,7 +173,8 @@ def tower_snippet(req: func.HttpRequest) -> func.HttpResponse:
         )
         raw_response = response.choices[0].message.content
         code_snippet = extract_snippet(raw_response)
+        logging.info('OpenAI call successful in tower_snippet')
         return func.HttpResponse(json.dumps({"snippet": code_snippet}), mimetype="application/json")
     except Exception as e:
-        logging.error(f"Error calling Azure OpenAI for tower snippet: {str(e)}")
+        logging.error("Error calling Azure OpenAI for tower snippet", exc_info=True)
         return func.HttpResponse(f"Error processing your request for tower snippet: {str(e)}", status_code=500) 
