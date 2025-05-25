@@ -133,23 +133,4 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             f"Error processing your request with AI assistant: {str(e)}",
             status_code=500
-        )
-
-# Example of how to call this function locally (for testing, requires OpenAI env vars)
-if __name__ == "__main__":
-    if not client:
-        print("Skipping local test: Azure OpenAI client not configured (check AZURE_OPENAI_* env vars).")
-    else:
-        # Mock HttpRequest
-        class MockHttpRequest:
-            def get_json(self):
-                return {
-                    "query": "I'm stuck on the Two Sum problem. How can I use a hash map?",
-                    "assistance_level": "Hints Only - Get hints and guidance, but never full code.",
-                    # "solution_context": "def solve_two_sum(nums, target):\n  # help!"
-                }
-
-        print("Testing GetHackAssistantResponseProxy locally...")
-        response = main(MockHttpRequest())
-        print(f"Status Code: {response.status_code}")
-        print(f"Body: {response.get_body()}") 
+        ) 

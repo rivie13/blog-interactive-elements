@@ -171,38 +171,4 @@ except Exception as e:
     return func.HttpResponse(
         json.dumps({"all_passed": all_passed, "results": results}),
         mimetype="application/json"
-    )
-
-# Example of how to call this function locally (for testing)
-if __name__ == "__main__":
-    # Mock HttpRequest
-    class MockHttpRequest:
-        def get_json(self):
-            # Example user code submission
-            return {
-                "code": """
-def solve_two_sum(nums, target):
-    num_to_index = {}
-    for i, num in enumerate(nums):
-        complement = target - num
-        if complement in num_to_index:
-            return [num_to_index[complement], i]
-        num_to_index[num] = i
-    return [] # Should not happen based on problem description (exactly one solution)
-
-# Or, for class-based solution:
-# class Solution:
-#     def twoSum(self, nums: list[int], target: int) -> list[int]:
-#         num_to_index = {}
-#         for i, num in enumerate(nums):
-#             complement = target - num
-#             if complement in num_to_index:
-#                 return [num_to_index[complement], i]
-#             num_to_index[num] = i
-#         return []
-"""
-            }
-
-    response = main(MockHttpRequest())
-    print(f"Status Code: {response.status_code}")
-    print(f"Body: {response.get_body()}") 
+    ) 
