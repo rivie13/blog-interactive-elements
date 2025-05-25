@@ -4,6 +4,9 @@ import json
 import os
 import requests # Assuming Judge0 will be called via HTTP
 import re
+import time
+from azure.data.tables import TableServiceClient, UpdateMode
+from datetime import datetime, timedelta
 
 # TODO: Retrieve Judge0 API details from Key Vault or environment variables
 JUDGE0_API_URL = os.environ.get("JUDGE0_API_URL", "YOUR_JUDGE0_API_ENDPOINT") # Replace with your Judge0 endpoint
@@ -18,6 +21,33 @@ TWO_SUM_TEST_CASES = [
     # Add more diverse test cases
 ]
 
+# --- VM Wake-up Logic ---
+START_VM_URL = os.environ.get("START_VM_FUNCTION_URL")
+GET_VM_STATUS_URL = os.environ.get("GET_VM_STATUS_FUNCTION_URL")
+
+# Helper to ensure VM is running before Judge0 call
+def ensure_vm_running(timeout=300, poll_interval=10):
+    if not START_VM_URL or not GET_VM_STATUS_URL:
+        logging.error("VM control URLs not set in environment variables.")
+        return False
+    try:
+        requests.post(START_VM_URL, timeout=10)
+    except Exception as e:
+        logging.error(f"Failed to call StartVmHttpTrigger: {e}")
+        return False
+    elapsed = 0
+    while elapsed < timeout:
+        try:
+            resp = requests.get(GET_VM_STATUS_URL, timeout=10)
+            data = resp.json()
+            if data.get("status") == "PowerState/running":
+                return True
+        except Exception as e:
+            logging.warning(f"Polling VM status failed: {e}")
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+    return False
+
 # Function to scrub IP addresses from error messages
 def scrub_ip_addresses(text):
     # Match IPv4 addresses
@@ -30,8 +60,58 @@ def scrub_ip_addresses(text):
     text = re.sub(ipv6_pattern, '[REDACTED]', text)
     return text
 
+RATE_LIMIT = 10  # max requests
+WINDOW_SECONDS = 60  # per 60 seconds
+
+def is_rate_limited(ip: str) -> bool:
+    conn_str = os.environ["DEPLOYMENT_STORAGE_CONNECTION_STRING"]
+    table_name = "RateLimit"
+    now = datetime.utcnow()
+    window_start = now - timedelta(seconds=WINDOW_SECONDS)
+    partition_key = ip.replace('.', '-').replace(':', '-')  # sanitize for Table Storage
+
+    # Connect to Table Storage
+    service = TableServiceClient.from_connection_string(conn_str)
+    table = service.get_table_client(table_name)
+    try:
+        entity = table.get_entity(partition_key=partition_key, row_key="rate")
+        count = entity["Count"]
+        last_reset = datetime.strptime(entity["LastReset"], "%Y-%m-%dT%H:%M:%S.%f")
+        if last_reset < window_start:
+            # Reset window
+            entity["Count"] = 1
+            entity["LastReset"] = now.isoformat()
+            table.update_entity(entity, mode=UpdateMode.REPLACE)
+            return False
+        elif count >= RATE_LIMIT:
+            return True
+        else:
+            entity["Count"] = count + 1
+            table.update_entity(entity, mode=UpdateMode.REPLACE)
+            return False
+    except Exception:
+        # Entity does not exist, create it
+        entity = {
+            "PartitionKey": partition_key,
+            "RowKey": "rate",
+            "Count": 1,
+            "LastReset": now.isoformat()
+        }
+        table.upsert_entity(entity)
+        return False
+
 def main(req: func.HttpRequest) -> func.HttpResponse:
+    ip = req.headers.get('X-Forwarded-For', req.headers.get('X-Client-IP', req.remote_addr))
+    if is_rate_limited(ip):
+        return func.HttpResponse("Too many requests. Please slow down.", status_code=429)
     logging.info('Python HTTP trigger function processed a request for ExecuteTwoSumSolutionProxy.')
+
+    # --- Ensure VM is running before proceeding ---
+    if not ensure_vm_running():
+        return func.HttpResponse(
+            "Judge0 VM is not ready. Please try again in a moment.",
+            status_code=503
+        )
 
     try:
         req_body = req.get_json()

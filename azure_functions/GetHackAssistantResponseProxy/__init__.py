@@ -3,6 +3,8 @@ import azure.functions as func
 import json
 import os
 from openai import AzureOpenAI # Using the official OpenAI library
+from azure.data.tables import TableServiceClient, UpdateMode
+from datetime import datetime, timedelta
 
 # TODO: Retrieve Azure OpenAI details from Key Vault or environment variables
 AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
@@ -50,7 +52,52 @@ SYSTEM_PROMPTS = {
     }
 }
 
+RATE_LIMIT = 10  # max requests
+WINDOW_SECONDS = 60  # per 60 seconds
+
+def is_rate_limited(ip: str) -> bool:
+    conn_str = os.environ["DEPLOYMENT_STORAGE_CONNECTION_STRING"]
+    table_name = "RateLimit"
+    now = datetime.utcnow()
+    window_start = now - timedelta(seconds=WINDOW_SECONDS)
+    partition_key = ip.replace('.', '-').replace(':', '-')  # sanitize for Table Storage
+
+    # Connect to Table Storage
+    service = TableServiceClient.from_connection_string(conn_str)
+    table = service.get_table_client(table_name)
+    try:
+        entity = table.get_entity(partition_key=partition_key, row_key="hackassistant")
+        count = entity["Count"]
+        last_reset = datetime.strptime(entity["LastReset"], "%Y-%m-%dT%H:%M:%S.%f")
+        if last_reset < window_start:
+            # Reset window
+            entity["Count"] = 1
+            entity["LastReset"] = now.isoformat()
+            table.update_entity(entity, mode=UpdateMode.REPLACE)
+            return False
+        elif count >= RATE_LIMIT:
+            return True
+        else:
+            entity["Count"] = count + 1
+            table.update_entity(entity, mode=UpdateMode.REPLACE)
+            return False
+    except Exception:
+        # Entity does not exist, create it
+        entity = {
+            "PartitionKey": partition_key,
+            "RowKey": "hackassistant",
+            "Count": 1,
+            "LastReset": now.isoformat()
+        }
+        table.upsert_entity(entity)
+        return False
+
 def main(req: func.HttpRequest) -> func.HttpResponse:
+    # --- Rate limiting per IP ---
+    ip = req.headers.get('X-Forwarded-For', req.headers.get('X-Client-IP', req.remote_addr))
+    if is_rate_limited(ip):
+        return func.HttpResponse("Too many requests. Please slow down.", status_code=429)
+
     logging.info('Python HTTP trigger function processed a request for GetHackAssistantResponseProxy.')
 
     if not client:

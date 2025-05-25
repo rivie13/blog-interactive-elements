@@ -1,3 +1,4 @@
 azure-functions
 requests
 openai
+azure-data-tables>=12.4.0
