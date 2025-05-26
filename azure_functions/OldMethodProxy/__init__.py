@@ -70,6 +70,17 @@ def is_rate_limited(ip: str):
         return False, RATE_LIMIT-1, WINDOW_SECONDS
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
+    # Handle CORS preflight
+    if req.method == "OPTIONS":
+        return func.HttpResponse(
+            "",
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": "http://localhost:4000, http://127.0.0.1:4000, https://rivie13.github.io",  # Or your allowed origin
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            }
+        )
     logging.info('Entered main() for OldMethodProxy')
     ip = req.headers.get('X-Forwarded-For') or req.headers.get('X-Client-IP') or 'unknown'
     logging.info(f'Received request from IP: {ip}')
