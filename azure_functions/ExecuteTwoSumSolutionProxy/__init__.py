@@ -73,7 +73,7 @@ def is_rate_limited(ip: str):
     service = TableServiceClient.from_connection_string(conn_str)
     table = service.get_table_client(table_name)
     try:
-        entity = table.get_entity(partition_key=partition_key, row_key="rate")
+        entity = table.get_entity(partition_key=partition_key, row_key="execute")
         count = entity["Count"]
         last_reset = datetime.strptime(entity["LastReset"], "%Y-%m-%dT%H:%M:%S.%f")
         now = datetime.utcnow()
@@ -92,7 +92,7 @@ def is_rate_limited(ip: str):
     except Exception:
         entity = {
             "PartitionKey": partition_key,
-            "RowKey": "rate",
+            "RowKey": "execute",
             "Count": 1,
             "LastReset": now.isoformat()
         }
