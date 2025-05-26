@@ -64,34 +64,32 @@ def scrub_ip_addresses(text):
 RATE_LIMIT = 10  # max requests
 WINDOW_SECONDS = 60  # per 60 seconds
 
-def is_rate_limited(ip: str) -> bool:
+def is_rate_limited(ip: str):
     conn_str = os.environ["DEPLOYMENT_STORAGE_CONNECTION_STRING"]
     table_name = "RateLimit"
     now = datetime.utcnow()
     window_start = now - timedelta(seconds=WINDOW_SECONDS)
-    partition_key = ip.replace('.', '-').replace(':', '-')  # sanitize for Table Storage
-
-    # Connect to Table Storage
+    partition_key = ip.replace('.', '-').replace(':', '-')
     service = TableServiceClient.from_connection_string(conn_str)
     table = service.get_table_client(table_name)
     try:
         entity = table.get_entity(partition_key=partition_key, row_key="rate")
         count = entity["Count"]
         last_reset = datetime.strptime(entity["LastReset"], "%Y-%m-%dT%H:%M:%S.%f")
+        now = datetime.utcnow()
         if last_reset < window_start:
-            # Reset window
             entity["Count"] = 1
             entity["LastReset"] = now.isoformat()
             table.update_entity(entity, mode=UpdateMode.REPLACE)
-            return False
+            return False, RATE_LIMIT-1, WINDOW_SECONDS
         elif count >= RATE_LIMIT:
-            return True
+            reset_seconds = int((last_reset + timedelta(seconds=WINDOW_SECONDS) - now).total_seconds())
+            return True, 0, max(reset_seconds, 0)
         else:
             entity["Count"] = count + 1
             table.update_entity(entity, mode=UpdateMode.REPLACE)
-            return False
+            return False, RATE_LIMIT - (count + 1), int((last_reset + timedelta(seconds=WINDOW_SECONDS) - now).total_seconds())
     except Exception:
-        # Entity does not exist, create it
         entity = {
             "PartitionKey": partition_key,
             "RowKey": "rate",
@@ -99,19 +97,34 @@ def is_rate_limited(ip: str) -> bool:
             "LastReset": now.isoformat()
         }
         table.upsert_entity(entity)
-        return False
+        return False, RATE_LIMIT-1, WINDOW_SECONDS
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Entered main() for ExecuteTwoSumSolutionProxy')
     ip = req.headers.get('X-Forwarded-For') or req.headers.get('X-Client-IP') or 'unknown'
     logging.info(f'Received request from IP: {ip}')
     try:
-        if is_rate_limited(ip):
-            logging.warning(f'Rate limit exceeded for IP: {ip}')
-            return func.HttpResponse("Too many requests. Please slow down.", status_code=429)
+        is_limited, requests_remaining, reset_seconds = is_rate_limited(ip)
+        if is_limited:
+            return func.HttpResponse(
+                json.dumps({
+                    "error": "Too many requests. Please slow down.",
+                    "requests_remaining": requests_remaining,
+                    "reset_seconds": reset_seconds
+                }),
+                mimetype="application/json",
+                status_code=429
+            )
     except Exception as e:
-        logging.error("Exception in rate limiting", exc_info=True)
-        return func.HttpResponse(f"Error: {str(e)}", status_code=500)
+        return func.HttpResponse(
+            json.dumps({
+                "error": f"Error: {str(e)}",
+                "requests_remaining": 0,
+                "reset_seconds": WINDOW_SECONDS
+            }),
+            mimetype="application/json",
+            status_code=500
+        )
     logging.info('Python HTTP trigger function processed a request for ExecuteTwoSumSolutionProxy.')
     # --- Ensure VM is running before proceeding ---
     try:
@@ -209,6 +222,11 @@ except Exception as e:
             all_passed = False
     logging.info(f'All test cases passed: {all_passed}')
     return func.HttpResponse(
-        json.dumps({"all_passed": all_passed, "results": results}),
+        json.dumps({
+            "all_passed": all_passed,
+            "results": results,
+            "requests_remaining": requests_remaining,
+            "reset_seconds": reset_seconds
+        }),
         mimetype="application/json"
     ) 

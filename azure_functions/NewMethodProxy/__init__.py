@@ -54,38 +54,35 @@ SYSTEM_PROMPTS = {
     }
 }
 
-def is_rate_limited(ip: str) -> bool:
+def is_rate_limited(ip: str):
     conn_str = os.environ["DEPLOYMENT_STORAGE_CONNECTION_STRING"]
     table_name = "RateLimit"
     now = datetime.utcnow()
     window_start = now - timedelta(seconds=WINDOW_SECONDS)
     partition_key = ip.replace('.', '-').replace(':', '-')
     service = TableServiceClient.from_connection_string(conn_str)
-    
-    # Create table if it doesn't exist
     try:
         service.create_table(table_name)
-        logging.info(f"Created table {table_name}")
-    except Exception as e:
-        # Table might already exist, which is fine
-        logging.info(f"Table {table_name} might already exist: {str(e)}")
-    
+    except Exception:
+        pass
     table = service.get_table_client(table_name)
     try:
         entity = table.get_entity(partition_key=partition_key, row_key="newmethod")
         count = entity["Count"]
         last_reset = datetime.strptime(entity["LastReset"], "%Y-%m-%dT%H:%M:%S.%f")
+        now = datetime.utcnow()
         if last_reset < window_start:
             entity["Count"] = 1
             entity["LastReset"] = now.isoformat()
             table.update_entity(entity, mode=UpdateMode.REPLACE)
-            return False
+            return False, RATE_LIMIT-1, WINDOW_SECONDS
         elif count >= RATE_LIMIT:
-            return True
+            reset_seconds = int((last_reset + timedelta(seconds=WINDOW_SECONDS) - now).total_seconds())
+            return True, 0, max(reset_seconds, 0)
         else:
             entity["Count"] = count + 1
             table.update_entity(entity, mode=UpdateMode.REPLACE)
-            return False
+            return False, RATE_LIMIT - (count + 1), int((last_reset + timedelta(seconds=WINDOW_SECONDS) - now).total_seconds())
     except Exception:
         entity = {
             "PartitionKey": partition_key,
@@ -94,19 +91,34 @@ def is_rate_limited(ip: str) -> bool:
             "LastReset": now.isoformat()
         }
         table.upsert_entity(entity)
-        return False
+        return False, RATE_LIMIT-1, WINDOW_SECONDS
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Entered main() for NewMethodProxy')
     ip = req.headers.get('X-Forwarded-For') or req.headers.get('X-Client-IP') or 'unknown'
     logging.info(f'Received request from IP: {ip}')
     try:
-        if is_rate_limited(ip):
-            logging.warning(f'Rate limit exceeded for IP: {ip}')
-            return func.HttpResponse("Too many requests. Please slow down.", status_code=429)
+        is_limited, requests_remaining, reset_seconds = is_rate_limited(ip)
+        if is_limited:
+            return func.HttpResponse(
+                json.dumps({
+                    "error": "Too many requests. Please slow down.",
+                    "requests_remaining": requests_remaining,
+                    "reset_seconds": reset_seconds
+                }),
+                mimetype="application/json",
+                status_code=429
+            )
     except Exception as e:
-        logging.error("Exception in rate limiting", exc_info=True)
-        return func.HttpResponse(f"Error: {str(e)}", status_code=500)
+        return func.HttpResponse(
+            json.dumps({
+                "error": f"Error: {str(e)}",
+                "requests_remaining": 0,
+                "reset_seconds": WINDOW_SECONDS
+            }),
+            mimetype="application/json",
+            status_code=500
+        )
     logging.info('Python HTTP trigger function processed a request for NewMethodProxy.')
     # Route dispatch
     subroute = req.route_params.get('subroute', '')
@@ -151,7 +163,15 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         )
         ai_response = response.choices[0].message
         logging.info('OpenAI call successful')
-        return func.HttpResponse(json.dumps({"response": ai_response}), mimetype="application/json")
+        is_limited, requests_remaining, reset_seconds = is_rate_limited(ip)
+        return func.HttpResponse(
+            json.dumps({
+                "response": ai_response,
+                "requests_remaining": requests_remaining,
+                "reset_seconds": reset_seconds
+            }),
+            mimetype="application/json"
+        )
     except Exception as e:
         logging.error("Error calling Azure OpenAI", exc_info=True)
         return func.HttpResponse(f"Error processing your request with AI assistant: {str(e)}", status_code=500)
@@ -169,6 +189,29 @@ def extract_single_line_of_code(response_text):
 
 def tower_snippet(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Entered tower_snippet() for NewMethodProxy')
+    ip = req.headers.get('X-Forwarded-For') or req.headers.get('X-Client-IP') or 'unknown'
+    try:
+        is_limited, requests_remaining, reset_seconds = is_rate_limited(ip)
+        if is_limited:
+            return func.HttpResponse(
+                json.dumps({
+                    "error": "Too many requests. Please slow down.",
+                    "requests_remaining": requests_remaining,
+                    "reset_seconds": reset_seconds
+                }),
+                mimetype="application/json",
+                status_code=429
+            )
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({
+                "error": f"Error: {str(e)}",
+                "requests_remaining": 0,
+                "reset_seconds": WINDOW_SECONDS
+            }),
+            mimetype="application/json",
+            status_code=500
+        )
     try:
         req_body = req.get_json()
     except Exception as e:
@@ -232,7 +275,15 @@ def tower_snippet(req: func.HttpRequest) -> func.HttpResponse:
         raw_response = response.choices[0].message.content
         code_line = extract_single_line_of_code(raw_response)
         logging.info('OpenAI call successful in tower_snippet')
-        return func.HttpResponse(json.dumps({"snippet": code_line}), mimetype="application/json")
+        is_limited, requests_remaining, reset_seconds = is_rate_limited(ip)
+        return func.HttpResponse(
+            json.dumps({
+                "snippet": code_line,
+                "requests_remaining": requests_remaining,
+                "reset_seconds": reset_seconds
+            }),
+            mimetype="application/json"
+        )
     except Exception as e:
         logging.error("Error calling Azure OpenAI for tower snippet", exc_info=True)
         return func.HttpResponse(f"Error processing your request for tower snippet: {str(e)}", status_code=500) 
