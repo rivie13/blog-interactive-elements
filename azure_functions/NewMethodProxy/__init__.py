@@ -155,7 +155,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         return handle_chat(req_body, requests_remaining, reset_seconds)
     elif subroute == 'tower-snippet':
         logging.warning('Dispatching to tower_snippet()')
-        return tower_snippet(req)
+        return tower_snippet(req, requests_remaining, reset_seconds)
     else:
         return func.HttpResponse(
             json.dumps({"error": f"Invalid subroute: {subroute}"}),
@@ -251,37 +251,8 @@ def extract_single_line_of_code(response_text):
             return line
     return code.strip()
 
-def tower_snippet(req: func.HttpRequest) -> func.HttpResponse:
+def tower_snippet(req: func.HttpRequest, requests_remaining, reset_seconds) -> func.HttpResponse:
     logging.info('Entered tower_snippet() for NewMethodProxy')
-    ip = req.headers.get('X-Forwarded-For') or req.headers.get('X-Client-IP') or 'unknown'
-    try:
-        is_limited, requests_remaining, reset_seconds = is_rate_limited(ip)
-        logging.warning(f"Rate limit check in tower_snippet: is_limited={is_limited}, requests_remaining={requests_remaining}, reset_seconds={reset_seconds}")
-        if is_limited:
-            resp = func.HttpResponse(
-                json.dumps({
-                    "error": "Too many requests. Please slow down.",
-                    "requests_remaining": requests_remaining,
-                    "reset_seconds": reset_seconds
-                }),
-                mimetype="application/json",
-                status_code=429
-            )
-            logging.warning(f"Returning rate limit response in tower_snippet: {resp.get_body()}")
-            return resp
-    except Exception as e:
-        logging.error("Exception in rate limit check in tower_snippet: %s", traceback.format_exc())
-        resp = func.HttpResponse(
-            json.dumps({
-                "error": f"Error: {str(e)}",
-                "requests_remaining": 0,
-                "reset_seconds": WINDOW_SECONDS
-            }),
-            mimetype="application/json",
-            status_code=500
-        )
-        logging.warning(f"Returning error response in tower_snippet: {resp.get_body()}")
-        return resp
     try:
         req_body = req.get_json()
         logging.warning(f"Parsed request body in tower_snippet: {req_body}")
@@ -350,7 +321,6 @@ def tower_snippet(req: func.HttpRequest) -> func.HttpResponse:
         raw_response = response.choices[0].message.content
         logging.warning(f"Azure OpenAI response in tower_snippet: {raw_response}")
         code_line = extract_single_line_of_code(raw_response)
-        is_limited, requests_remaining, reset_seconds = is_rate_limited(ip)
         resp = func.HttpResponse(
             json.dumps({
                 "snippet": code_line,

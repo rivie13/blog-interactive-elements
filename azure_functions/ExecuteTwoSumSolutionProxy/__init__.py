@@ -62,7 +62,7 @@ def scrub_ip_addresses(text):
     return text
 
 RATE_LIMIT = 10  # max requests
-WINDOW_SECONDS = 60  # per 60 seconds
+WINDOW_SECONDS = 60 * 3 # per 3 minutes
 
 def is_rate_limited(ip: str):
     conn_str = os.environ["DEPLOYMENT_STORAGE_CONNECTION_STRING"]

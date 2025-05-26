@@ -111,7 +111,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     subroute = req.route_params.get('subroute', '')
     logging.info(f'Route subroute: {subroute}')
     if subroute == 'tower-snippet':
-        return tower_snippet(req)
+        return tower_snippet(req, requests_remaining, reset_seconds)
     AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
     AZURE_OPENAI_API_KEY = os.environ.get("AZURE_OPENAI_API_KEY")
     AZURE_OPENAI_DEPLOYMENT_NAME = os.environ.get("AZURE_DEPLOYMENT_NAME", "gpt-4o")
@@ -170,31 +170,8 @@ def extract_snippet(response_text):
     lines = [line for line in code.split('\n') if line.strip() and not line.strip().startswith('#') and not line.strip().startswith('//')]
     return '\n'.join(lines).strip()
 
-def tower_snippet(req: func.HttpRequest) -> func.HttpResponse:
+def tower_snippet(req: func.HttpRequest, requests_remaining, reset_seconds) -> func.HttpResponse:
     logging.info('Entered tower_snippet() for OldMethodProxy')
-    ip = req.headers.get('X-Forwarded-For') or req.headers.get('X-Client-IP') or 'unknown'
-    try:
-        is_limited, requests_remaining, reset_seconds = is_rate_limited(ip)
-        if is_limited:
-            return func.HttpResponse(
-                json.dumps({
-                    "error": "Too many requests. Please slow down.",
-                    "requests_remaining": requests_remaining,
-                    "reset_seconds": reset_seconds
-                }),
-                mimetype="application/json",
-                status_code=429
-            )
-    except Exception as e:
-        return func.HttpResponse(
-            json.dumps({
-                "error": f"Error: {str(e)}",
-                "requests_remaining": 0,
-                "reset_seconds": WINDOW_SECONDS
-            }),
-            mimetype="application/json",
-            status_code=500
-        )
     try:
         req_body = req.get_json()
     except Exception as e:
