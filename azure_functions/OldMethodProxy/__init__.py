@@ -69,7 +69,7 @@ def is_rate_limited(ip: str) -> bool:
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Entered main() for OldMethodProxy')
-    ip = req.headers.get('X-Forwarded-For', req.headers.get('X-Client-IP', req.remote_addr))
+    ip = req.headers.get('X-Forwarded-For') or req.headers.get('X-Client-IP') or 'unknown'
     logging.info(f'Received request from IP: {ip}')
     try:
         if is_rate_limited(ip):
