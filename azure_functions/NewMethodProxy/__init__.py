@@ -94,6 +94,21 @@ def is_rate_limited(ip: str):
         return False, RATE_LIMIT-1, WINDOW_SECONDS
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
+    logging.warning('==== New request received in NewMethodProxy ====' )
+    logging.warning(f'Method: {req.method}')
+    try:
+        logging.warning(f'Headers: {dict(req.headers)}')
+    except Exception as e:
+        logging.warning(f'Could not log headers: {e}')
+    try:
+        logging.warning(f'Route params: {req.route_params}')
+    except Exception as e:
+        logging.warning(f'Could not log route params: {e}')
+    try:
+        body = req.get_body()
+        logging.warning(f'Request body (raw): {body[:1000]}')  # log up to 1000 bytes
+    except Exception as e:
+        logging.warning(f'Could not log request body: {e}')
     # Handle CORS preflight
     if req.method == "OPTIONS":
         return func.HttpResponse(
