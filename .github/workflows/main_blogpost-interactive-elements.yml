@@ -32,12 +32,14 @@ jobs:
       - name: Install dependencies for Azure Functions
         run: |
           python -m pip install --upgrade pip
-          # Create the packages directory if it doesn't exist
+          # Create the packages directory
           mkdir -p azure_functions/.python_packages/lib/site-packages
           # Install packages to the correct location
           pip install -r azure_functions/requirements.txt -t azure_functions/.python_packages/lib/site-packages
           # Create a .pth file to add the packages to Python path
           echo "azure_functions/.python_packages/lib/site-packages" > azure_functions/.python_packages/lib/site-packages/azure_functions.pth
+          # Copy packages to the function app directory
+          cp -r azure_functions/.python_packages/lib/site-packages/* azure_functions/
 
       - name: Verify Python packages installation
         run: |
@@ -53,7 +55,7 @@ jobs:
           python -c "import sys; print('\n'.join(sys.path))"
           echo "=== Testing package imports ==="
           # Add the packages directory to PYTHONPATH for this command
-          PYTHONPATH=azure_functions/.python_packages/lib/site-packages python -c "import azure.functions; import openai; import requests; print('All required packages imported successfully')"
+          PYTHONPATH=azure_functions/.python_packages/lib/site-packages python -c "import azure.functions; import openai; import requests; from azure.data.tables import TableServiceClient; print('All required packages imported successfully')"
 
       - name: Verify Azure Functions structure
         run: |
