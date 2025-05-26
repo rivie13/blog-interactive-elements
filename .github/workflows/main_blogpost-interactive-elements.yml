@@ -34,8 +34,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r azure_functions/requirements.txt -t azure_functions/.python_packages/lib/site-packages
 
-      - name: List .python_packages contents
-        run: ls -lR azure_functions/.python_packages
+      - name: Verify Python packages installation
+        run: |
+          echo "=== Checking Python packages directory structure ==="
+          ls -la azure_functions/.python_packages/lib/site-packages
+          echo "=== Checking for specific required packages ==="
+          ls -la azure_functions/.python_packages/lib/site-packages/azure
+          ls -la azure_functions/.python_packages/lib/site-packages/openai
+          ls -la azure_functions/.python_packages/lib/site-packages/requests
+          echo "=== Checking package sizes ==="
+          du -sh azure_functions/.python_packages/lib/site-packages/*
+          echo "=== Verifying Python path ==="
+          python -c "import sys; print('\n'.join(sys.path))"
+          echo "=== Testing package imports ==="
+          python -c "import azure.functions; import openai; import requests; print('All required packages imported successfully')"
+
+      - name: Verify Azure Functions structure
+        run: |
+          echo "=== Checking Azure Functions directory structure ==="
+          ls -R azure_functions/
+          echo "=== Verifying function.json files ==="
+          find azure_functions -name "function.json" -type f -exec echo {} \;
+          echo "=== Checking for __init__.py files ==="
+          find azure_functions -name "__init__.py" -type f -exec echo {} \;
 
   deploy:
     runs-on: ubuntu-latest
@@ -62,6 +83,4 @@ jobs:
           app-name: 'blogpost-interactive-elements'
           slot-name: 'Production'
           package: ./azure_functions
-          scm-do-build-during-deployment: true
-          enable-oryx-build: true
           
