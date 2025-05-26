@@ -189,32 +189,41 @@ def handle_chat(req_body, requests_remaining, reset_seconds):
             status_code=500
         )
     
+    # Map assistance_level to SYSTEM_PROMPTS key
+    level_map = {
+        'hints_only': 'hints',
+        'full_solution': 'full_solution',
+        'step_by_step': 'step_by_step',
+        'debug_mode': 'debug',
+        'learning_mode': 'learning',
+        'chat': 'chat'
+    }
+    prompt_key = level_map.get(assistance_level, 'hints')
+    system_prompt = SYSTEM_PROMPTS.get(prompt_key, SYSTEM_PROMPTS['hints'])
+    # Prepend system prompt to messages
+    openai_messages = [system_prompt] + messages
     client = AzureOpenAI(
         azure_endpoint=AZURE_OPENAI_ENDPOINT,
         api_key=AZURE_OPENAI_API_KEY,
         api_version=AZURE_OPENAI_API_VERSION
     )
-    
     try:
         response = client.chat.completions.create(
             model=AZURE_OPENAI_DEPLOYMENT_NAME,
-            messages=messages,
+            messages=openai_messages,
             max_tokens=800,
             temperature=0.7,
             top_p=0.95,
             frequency_penalty=0,
             presence_penalty=0
         )
-        
         ai_response = response.choices[0].message
         # Return only the content string
         if hasattr(ai_response, "content"):
             ai_response = ai_response.content
         else:
             ai_response = str(ai_response)
-        
         logging.info('OpenAI call successful')
-        
         return func.HttpResponse(
             json.dumps({
                 "response": ai_response,
