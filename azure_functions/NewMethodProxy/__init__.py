@@ -207,11 +207,11 @@ def handle_chat(req_body, requests_remaining, reset_seconds):
         )
         
         ai_response = response.choices[0].message
-        # Convert to dict for JSON serialization
-        if hasattr(ai_response, "model_dump"):
-            ai_response = ai_response.model_dump()
+        # Return only the content string
+        if hasattr(ai_response, "content"):
+            ai_response = ai_response.content
         else:
-            ai_response = ai_response.__dict__
+            ai_response = str(ai_response)
         
         logging.info('OpenAI call successful')
         
