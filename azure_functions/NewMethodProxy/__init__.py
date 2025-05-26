@@ -94,35 +94,27 @@ def is_rate_limited(ip: str):
         return False, RATE_LIMIT-1, WINDOW_SECONDS
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
-    logging.warning('==== New request received in NewMethodProxy ====' )
-    logging.warning(f'Method: {req.method}')
-    try:
-        logging.warning(f'Headers: {dict(req.headers)}')
-    except Exception as e:
-        logging.warning(f'Could not log headers: {e}')
-    try:
-        logging.warning(f'Route params: {req.route_params}')
-    except Exception as e:
-        logging.warning(f'Could not log route params: {e}')
-    try:
-        body = req.get_body()
-        logging.warning(f'Request body (raw): {body[:1000]}')  # log up to 1000 bytes
-    except Exception as e:
-        logging.warning(f'Could not log request body: {e}')
     # Handle CORS preflight
     if req.method == "OPTIONS":
         return func.HttpResponse(
             "",
             status_code=204,
             headers={
-                "Access-Control-Allow-Origin": "http://localhost:4000, http://127.0.0.1:4000, https://rivie13.github.io",  # Or your allowed origin
+                "Access-Control-Allow-Origin": "http://localhost:4000, http://127.0.0.1:4000, https://rivie13.github.io",
                 "Access-Control-Allow-Methods": "POST, OPTIONS",
                 "Access-Control-Allow-Headers": "Content-Type, Authorization",
             }
         )
+    
     logging.info('Entered main() for NewMethodProxy')
     ip = req.headers.get('X-Forwarded-For') or req.headers.get('X-Client-IP') or 'unknown'
     logging.info(f'Received request from IP: {ip}')
+    
+    # Get the subroute from the URL
+    subroute = req.route_params.get('subroute', '')
+    logging.info(f'Route subroute: {subroute}')
+    
+    # Handle rate limiting
     try:
         is_limited, requests_remaining, reset_seconds = is_rate_limited(ip)
         if is_limited:
@@ -145,51 +137,84 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json",
             status_code=500
         )
-    logging.info('Python HTTP trigger function processed a request for NewMethodProxy.')
-    # Route dispatch
-    subroute = req.route_params.get('subroute', '')
-    logging.info(f'Route subroute: {subroute}')
-    if subroute == 'tower-snippet':
+    
+    # Parse request body
+    try:
+        req_body = req.get_json()
+        logging.info(f'Request body: {req_body}')
+    except ValueError as e:
+        logging.error("Failed to parse JSON body", exc_info=True)
+        return func.HttpResponse(
+            json.dumps({"error": "Please pass a valid JSON object in the request body"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    # Route handling
+    if subroute == 'chat':
+        return handle_chat(req_body, requests_remaining, reset_seconds)
+    elif subroute == 'tower-snippet':
+        logging.warning('Dispatching to tower_snippet()')
         return tower_snippet(req)
+    else:
+        return func.HttpResponse(
+            json.dumps({"error": f"Invalid subroute: {subroute}"}),
+            mimetype="application/json",
+            status_code=400
+        )
+
+def handle_chat(req_body, requests_remaining, reset_seconds):
+    """Handle chat requests"""
+    messages = req_body.get('messages')
+    assistance_level = req_body.get('assistanceLevel', 'hints_only')
+    
+    if not messages:
+        return func.HttpResponse(
+            json.dumps({"error": "Please pass 'messages' in the request body"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    # Get OpenAI configuration
     AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
     AZURE_OPENAI_API_KEY = os.environ.get("AZURE_OPENAI_API_KEY")
     AZURE_OPENAI_DEPLOYMENT_NAME = os.environ.get("AZURE_DEPLOYMENT_NAME", "gpt-4o")
     AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+    
     if not (AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY):
         logging.error("OpenAI service is not configured.")
-        return func.HttpResponse("OpenAI service is not configured.", status_code=500)
+        return func.HttpResponse(
+            json.dumps({"error": "OpenAI service is not configured."}),
+            mimetype="application/json",
+            status_code=500
+        )
+    
     client = AzureOpenAI(
         azure_endpoint=AZURE_OPENAI_ENDPOINT,
         api_key=AZURE_OPENAI_API_KEY,
         api_version=AZURE_OPENAI_API_VERSION
     )
-    try:
-        req_body = req.get_json()
-    except Exception as e:
-        logging.error("Failed to parse JSON body", exc_info=True)
-        return func.HttpResponse("Please pass a valid JSON object in the request body", status_code=400)
-    messages = req_body.get('messages')
-    assistance_level = req_body.get('assistanceLevel', 'hints')
-    if not messages:
-        logging.error("Missing 'messages' in request body")
-        return func.HttpResponse("Please pass 'messages' in the request body", status_code=400)
-    system_prompt = SYSTEM_PROMPTS.get(assistance_level, SYSTEM_PROMPTS["hints"])
-    if not isinstance(messages, list):
-        messages = [{"role": "user", "content": str(messages)}]
-    full_messages = [system_prompt] + messages
+    
     try:
         response = client.chat.completions.create(
             model=AZURE_OPENAI_DEPLOYMENT_NAME,
-            messages=full_messages,
+            messages=messages,
             max_tokens=800,
-            temperature=0.7 if assistance_level != 'problemGeneration' else 0.9,
+            temperature=0.7,
             top_p=0.95,
             frequency_penalty=0,
             presence_penalty=0
         )
+        
         ai_response = response.choices[0].message
+        # Convert to dict for JSON serialization
+        if hasattr(ai_response, "model_dump"):
+            ai_response = ai_response.model_dump()
+        else:
+            ai_response = ai_response.__dict__
+        
         logging.info('OpenAI call successful')
-        is_limited, requests_remaining, reset_seconds = is_rate_limited(ip)
+        
         return func.HttpResponse(
             json.dumps({
                 "response": ai_response,
@@ -200,7 +225,11 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         )
     except Exception as e:
         logging.error("Error calling Azure OpenAI", exc_info=True)
-        return func.HttpResponse(f"Error processing your request with AI assistant: {str(e)}", status_code=500)
+        return func.HttpResponse(
+            json.dumps({"error": f"Error processing your request with AI assistant: {str(e)}"}),
+            mimetype="application/json",
+            status_code=500
+        )
 
 def extract_single_line_of_code(response_text):
     # Remove markdown code blocks and comments
@@ -218,8 +247,9 @@ def tower_snippet(req: func.HttpRequest) -> func.HttpResponse:
     ip = req.headers.get('X-Forwarded-For') or req.headers.get('X-Client-IP') or 'unknown'
     try:
         is_limited, requests_remaining, reset_seconds = is_rate_limited(ip)
+        logging.warning(f"Rate limit check in tower_snippet: is_limited={is_limited}, requests_remaining={requests_remaining}, reset_seconds={reset_seconds}")
         if is_limited:
-            return func.HttpResponse(
+            resp = func.HttpResponse(
                 json.dumps({
                     "error": "Too many requests. Please slow down.",
                     "requests_remaining": requests_remaining,
@@ -228,8 +258,11 @@ def tower_snippet(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json",
                 status_code=429
             )
+            logging.warning(f"Returning rate limit response in tower_snippet: {resp.get_body()}")
+            return resp
     except Exception as e:
-        return func.HttpResponse(
+        logging.error("Exception in rate limit check in tower_snippet: %s", traceback.format_exc())
+        resp = func.HttpResponse(
             json.dumps({
                 "error": f"Error: {str(e)}",
                 "requests_remaining": 0,
@@ -238,20 +271,25 @@ def tower_snippet(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json",
             status_code=500
         )
+        logging.warning(f"Returning error response in tower_snippet: {resp.get_body()}")
+        return resp
     try:
         req_body = req.get_json()
+        logging.warning(f"Parsed request body in tower_snippet: {req_body}")
     except Exception as e:
-        logging.error("Failed to parse JSON body in tower_snippet", exc_info=True)
-        return func.HttpResponse("Please pass a valid JSON object in the request body", status_code=400)
+        logging.error("Failed to parse JSON body in tower_snippet: %s", traceback.format_exc())
+        resp = func.HttpResponse("Please pass a valid JSON object in the request body", status_code=400)
+        logging.warning(f"Returning error response in tower_snippet: {resp.get_body()}")
+        return resp
     context = req_body.get('context', {})
     tower_type = req_body.get('towerType')
     user_info = req_body.get('userInfo', {})
     if not tower_type or not context:
         logging.error("Missing 'context' or 'towerType' in tower_snippet request body")
-        return func.HttpResponse("Please pass 'context' and 'towerType' in the request body", status_code=400)
-    # Build the direct prompt
+        resp = func.HttpResponse("Please pass 'context' and 'towerType' in the request body", status_code=400)
+        logging.warning(f"Returning error response in tower_snippet: {resp.get_body()}")
+        return resp
     simplified_prompt = f"Generate ONLY a single, essential line of code for a {tower_type} in {context.get('language', 'Python')}\n\nCONTEXT:\nProblem: {context.get('problem', {}).get('title') or context.get('problem', {}).get('description') or context.get('problem', 'No problem description available')}\nLanguage: {context.get('language', 'Python')}\nTower Type: {tower_type}\nExisting Code Structure (DO NOT REPEAT CODE FROM HERE):\n```\n{context.get('code', '// No existing code provided')}\n```\n\nREQUIREMENTS FOR THE SINGLE LINE OF CODE:\n- Return EXACTLY ONE LINE of code relevant to the {tower_type}.\n- The line should be the next logical step for this tower type.\n- NO explanations, NO markdown formatting (like ```), NO comments.\n- Use variable names and styles consistent with the existing code if possible, but prioritize a single, correct line.\n- If this is tower number {context.get('towerCount', 1)} of this type, ensure any new variable in this line is named appropriately (e.g., item{context.get('towerCount', 1)}).\n\nSPECIFIC FORMAT FOR THE SINGLE LINE OF {tower_type.upper()}:\n"
-    # Add tower-type specific instructions
     if tower_type == 'ForLoop':
         simplified_prompt += "- Python: A 'for' loop declaration line ending with ':'. Example: 'for i in range(len(items)):'\n- JS/Java: A 'for' loop declaration line ending with '{'. Example: 'for (let i = 0; i < items.length; i++) {'"
     elif tower_type == 'WhileLoop':
@@ -275,20 +313,22 @@ def tower_snippet(req: func.HttpRequest) -> func.HttpResponse:
     else:
         simplified_prompt += f"- Generate the most essential single line of code for a {tower_type}."
     simplified_prompt += "\n\nReturn ONLY the single line of code."
-    # Prepare OpenAI call
     AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
     AZURE_OPENAI_API_KEY = os.environ.get("AZURE_OPENAI_API_KEY")
     AZURE_OPENAI_DEPLOYMENT_NAME = os.environ.get("AZURE_DEPLOYMENT_NAME", "gpt-4o")
     AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
     if not (AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY):
         logging.error("OpenAI service is not configured in tower_snippet.")
-        return func.HttpResponse("OpenAI service is not configured.", status_code=500)
+        resp = func.HttpResponse("OpenAI service is not configured.", status_code=500)
+        logging.warning(f"Returning error response in tower_snippet: {resp.get_body()}")
+        return resp
     client = AzureOpenAI(
         azure_endpoint=AZURE_OPENAI_ENDPOINT,
         api_key=AZURE_OPENAI_API_KEY,
         api_version=AZURE_OPENAI_API_VERSION
     )
     try:
+        logging.warning(f"Calling Azure OpenAI in tower_snippet with prompt: {simplified_prompt}")
         response = client.chat.completions.create(
             model=AZURE_OPENAI_DEPLOYMENT_NAME,
             messages=[SYSTEM_PROMPTS["snippetGeneration"], {"role": "user", "content": simplified_prompt}],
@@ -299,10 +339,10 @@ def tower_snippet(req: func.HttpRequest) -> func.HttpResponse:
             presence_penalty=0
         )
         raw_response = response.choices[0].message.content
+        logging.warning(f"Azure OpenAI response in tower_snippet: {raw_response}")
         code_line = extract_single_line_of_code(raw_response)
-        logging.info('OpenAI call successful in tower_snippet')
         is_limited, requests_remaining, reset_seconds = is_rate_limited(ip)
-        return func.HttpResponse(
+        resp = func.HttpResponse(
             json.dumps({
                 "snippet": code_line,
                 "requests_remaining": requests_remaining,
@@ -310,6 +350,10 @@ def tower_snippet(req: func.HttpRequest) -> func.HttpResponse:
             }),
             mimetype="application/json"
         )
+        logging.warning(f"Returning final response in tower_snippet: {resp.get_body()}")
+        return resp
     except Exception as e:
-        logging.error("Error calling Azure OpenAI for tower snippet", exc_info=True)
-        return func.HttpResponse(f"Error processing your request for tower snippet: {str(e)}", status_code=500) 
+        logging.error("Error calling Azure OpenAI for tower snippet: %s", traceback.format_exc())
+        resp = func.HttpResponse(f"Error processing your request for tower snippet: {str(e)}", status_code=500)
+        logging.warning(f"Returning error response in tower_snippet: {resp.get_body()}")
+        return resp 
