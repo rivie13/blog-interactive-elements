@@ -61,6 +61,15 @@ def is_rate_limited(ip: str) -> bool:
     window_start = now - timedelta(seconds=WINDOW_SECONDS)
     partition_key = ip.replace('.', '-').replace(':', '-')
     service = TableServiceClient.from_connection_string(conn_str)
+    
+    # Create table if it doesn't exist
+    try:
+        service.create_table(table_name)
+        logging.info(f"Created table {table_name}")
+    except Exception as e:
+        # Table might already exist, which is fine
+        logging.info(f"Table {table_name} might already exist: {str(e)}")
+    
     table = service.get_table_client(table_name)
     try:
         entity = table.get_entity(partition_key=partition_key, row_key="newmethod")
