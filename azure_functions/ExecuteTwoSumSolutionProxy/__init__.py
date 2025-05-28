@@ -32,21 +32,40 @@ def ensure_vm_running(timeout=300, poll_interval=10):
         logging.error("VM control URLs not set in environment variables.")
         return False
     try:
-        requests.post(START_VM_URL, timeout=10)
+        logging.info("Attempting to start VM...")
+        start_response = requests.post(START_VM_URL, timeout=10)
+        if not start_response.ok:
+            logging.error(f"Failed to start VM. Status: {start_response.status_code}")
+            return False
+        logging.info("Start VM request sent successfully")
     except Exception as e:
         logging.error(f"Failed to call StartVmHttpTrigger: {e}")
         return False
+
     elapsed = 0
     while elapsed < timeout:
         try:
+            logging.info(f"Checking VM status... (elapsed: {elapsed}s)")
             resp = requests.get(GET_VM_STATUS_URL, timeout=10)
+            if not resp.ok:
+                logging.warning(f"VM status check failed with status {resp.status_code}")
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+                continue
+                
             data = resp.json()
-            if data.get("status") == "PowerState/running":
+            status = data.get("status")
+            logging.info(f"Current VM status: {status}")
+            
+            if status == "PowerState/running":
+                logging.info("VM is running!")
                 return True
         except Exception as e:
             logging.warning(f"Polling VM status failed: {e}")
         time.sleep(poll_interval)
         elapsed += poll_interval
+        
+    logging.error(f"VM failed to start after {timeout} seconds")
     return False
 
 # Function to scrub IP addresses from error messages
@@ -100,16 +119,19 @@ def is_rate_limited(ip: str):
         return False, RATE_LIMIT-1, WINDOW_SECONDS
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
+    # Define CORS headers
+    cors_headers = {
+        "Access-Control-Allow-Origin": "https://rivie13.github.io, http://127.0.0.1:4000, http://localhost:4000",  # Temporarily more permissive for debugging
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    }
+    
     # Handle CORS preflight
     if req.method == "OPTIONS":
         return func.HttpResponse(
             "",
             status_code=204,
-            headers={
-                "Access-Control-Allow-Origin": "http://localhost:4000, http://127.0.0.1:4000, https://rivie13.github.io",  # Or your allowed origin
-                "Access-Control-Allow-Methods": "POST, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type, Authorization",
-            }
+            headers=cors_headers
         )
     logging.info('Entered main() for ExecuteTwoSumSolutionProxy')
     ip = req.headers.get('X-Forwarded-For') or req.headers.get('X-Client-IP') or 'unknown'
@@ -199,8 +221,8 @@ except Exception as e:
             import sys
             old_stdout = sys.stdout
             sys.stdout = captured_output = io.StringIO()
-            # Use the same dict for globals and locals so imports persist
-            exec(harness_code, local_scope, local_scope)
+            # Revert back to original exec() behavior
+            exec(harness_code, globals(), local_scope)
             sys.stdout = old_stdout
             output_str = captured_output.getvalue()
             try:
