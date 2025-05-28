@@ -209,8 +209,8 @@ def handle_chat(req_body, requests_remaining, reset_seconds):
                 mimetype="application/json",
                 status_code=400
             )
-        # Limit message length
-        if len(msg['content']) > 1000:
+        # Only limit length for user messages
+        if msg['role'] == 'user' and len(msg['content']) > 1000:
             return func.HttpResponse(
                 json.dumps({"error": "Message content too long"}),
                 mimetype="application/json",
