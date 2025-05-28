@@ -175,6 +175,57 @@ def handle_chat(req_body, requests_remaining, reset_seconds):
             status_code=400
         )
     
+    # Validate messages format and content
+    if not isinstance(messages, list):
+        return func.HttpResponse(
+            json.dumps({"error": "Messages must be a list"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
+    # Validate each message
+    for msg in messages:
+        if not isinstance(msg, dict):
+            return func.HttpResponse(
+                json.dumps({"error": "Each message must be an object"}),
+                mimetype="application/json",
+                status_code=400
+            )
+        if 'role' not in msg or 'content' not in msg:
+            return func.HttpResponse(
+                json.dumps({"error": "Each message must have 'role' and 'content' fields"}),
+                mimetype="application/json",
+                status_code=400
+            )
+        if msg['role'] not in ['user', 'assistant', 'system']:
+            return func.HttpResponse(
+                json.dumps({"error": "Invalid message role"}),
+                mimetype="application/json",
+                status_code=400
+            )
+        if not isinstance(msg['content'], str):
+            return func.HttpResponse(
+                json.dumps({"error": "Message content must be a string"}),
+                mimetype="application/json",
+                status_code=400
+            )
+        # Limit message length
+        if len(msg['content']) > 1000:
+            return func.HttpResponse(
+                json.dumps({"error": "Message content too long"}),
+                mimetype="application/json",
+                status_code=400
+            )
+    
+    # Validate assistance level
+    valid_levels = ['hints_only', 'full_solution', 'step_by_step', 'debug_mode', 'learning_mode', 'chat']
+    if assistance_level not in valid_levels:
+        return func.HttpResponse(
+            json.dumps({"error": "Invalid assistance level"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
     # Get OpenAI configuration
     AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT")
     AZURE_OPENAI_API_KEY = os.environ.get("AZURE_OPENAI_API_KEY")
@@ -200,13 +251,24 @@ def handle_chat(req_body, requests_remaining, reset_seconds):
     }
     prompt_key = level_map.get(assistance_level, 'hints')
     system_prompt = SYSTEM_PROMPTS.get(prompt_key, SYSTEM_PROMPTS['hints'])
+    
     # Prepend system prompt to messages
     openai_messages = [system_prompt] + messages
+    
+    # Limit total messages to prevent abuse
+    if len(openai_messages) > 20:
+        return func.HttpResponse(
+            json.dumps({"error": "Too many messages in conversation"}),
+            mimetype="application/json",
+            status_code=400
+        )
+    
     client = AzureOpenAI(
         azure_endpoint=AZURE_OPENAI_ENDPOINT,
         api_key=AZURE_OPENAI_API_KEY,
         api_version=AZURE_OPENAI_API_VERSION
     )
+    
     try:
         response = client.chat.completions.create(
             model=AZURE_OPENAI_DEPLOYMENT_NAME,
@@ -234,8 +296,9 @@ def handle_chat(req_body, requests_remaining, reset_seconds):
         )
     except Exception as e:
         logging.error("Error calling Azure OpenAI", exc_info=True)
+        # Don't expose internal error details to client
         return func.HttpResponse(
-            json.dumps({"error": f"Error processing your request with AI assistant: {str(e)}"}),
+            json.dumps({"error": "Error processing your request with AI assistant"}),
             mimetype="application/json",
             status_code=500
         )
