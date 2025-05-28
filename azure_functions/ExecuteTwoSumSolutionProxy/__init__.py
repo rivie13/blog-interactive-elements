@@ -221,8 +221,8 @@ except Exception as e:
             import sys
             old_stdout = sys.stdout
             sys.stdout = captured_output = io.StringIO()
-            # Revert back to original exec() behavior
-            exec(harness_code, globals(), local_scope)
+            # Use the same dict for globals and locals so imports persist
+            exec(harness_code, local_scope, local_scope)
             sys.stdout = old_stdout
             output_str = captured_output.getvalue()
             try:
@@ -235,9 +235,10 @@ except Exception as e:
         except Exception as e:
             sys.stdout = old_stdout
             error_message = str(e)
-            error_message = scrub_ip_addresses(error_message)
+            # Only redact IPs, not the rest of the error
+            redacted_message = scrub_ip_addresses(error_message)
             logging.error("Error executing harness", exc_info=True)
-            execution_result = {"status": "error", "message": f"Error executing harness: {error_message}"}
+            execution_result = {"status": "error", "message": f"Error executing harness: {redacted_message}"}
         test_passed = False
         if execution_result.get("status") == "success":
             user_output = execution_result.get("output")
