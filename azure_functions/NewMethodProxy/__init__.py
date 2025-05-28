@@ -94,16 +94,19 @@ def is_rate_limited(ip: str):
         return False, RATE_LIMIT-1, WINDOW_SECONDS
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
+    # Define CORS headers
+    cors_headers = {
+        "Access-Control-Allow-Origin": "http://localhost:4000, http://127.0.0.1:4000, https://rivie13.github.io",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    }
+    
     # Handle CORS preflight
     if req.method == "OPTIONS":
         return func.HttpResponse(
             "",
             status_code=204,
-            headers={
-                "Access-Control-Allow-Origin": "http://localhost:4000, http://127.0.0.1:4000, https://rivie13.github.io",
-                "Access-Control-Allow-Methods": "POST, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type, Authorization",
-            }
+            headers=cors_headers
         )
     
     logging.info('Entered main() for NewMethodProxy')
@@ -125,7 +128,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                     "reset_seconds": reset_seconds
                 }),
                 mimetype="application/json",
-                status_code=429
+                status_code=429,
+                headers=cors_headers
             )
     except Exception as e:
         return func.HttpResponse(
@@ -135,7 +139,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 "reset_seconds": WINDOW_SECONDS
             }),
             mimetype="application/json",
-            status_code=500
+            status_code=500,
+            headers=cors_headers
         )
     
     # Parse request body
@@ -147,23 +152,25 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({"error": "Please pass a valid JSON object in the request body"}),
             mimetype="application/json",
-            status_code=400
+            status_code=400,
+            headers=cors_headers
         )
     
     # Route handling
     if subroute == 'chat':
-        return handle_chat(req_body, requests_remaining, reset_seconds)
+        return handle_chat(req_body, requests_remaining, reset_seconds, cors_headers)
     elif subroute == 'tower-snippet':
         logging.warning('Dispatching to tower_snippet()')
-        return tower_snippet(req, requests_remaining, reset_seconds)
+        return tower_snippet(req, requests_remaining, reset_seconds, cors_headers)
     else:
         return func.HttpResponse(
             json.dumps({"error": f"Invalid subroute: {subroute}"}),
             mimetype="application/json",
-            status_code=400
+            status_code=400,
+            headers=cors_headers
         )
 
-def handle_chat(req_body, requests_remaining, reset_seconds):
+def handle_chat(req_body, requests_remaining, reset_seconds, cors_headers):
     """Handle chat requests"""
     messages = req_body.get('messages')
     assistance_level = req_body.get('assistanceLevel', 'hints_only')
@@ -172,7 +179,8 @@ def handle_chat(req_body, requests_remaining, reset_seconds):
         return func.HttpResponse(
             json.dumps({"error": "Please pass 'messages' in the request body"}),
             mimetype="application/json",
-            status_code=400
+            status_code=400,
+            headers=cors_headers
         )
     
     # Validate messages format and content
@@ -180,7 +188,8 @@ def handle_chat(req_body, requests_remaining, reset_seconds):
         return func.HttpResponse(
             json.dumps({"error": "Messages must be a list"}),
             mimetype="application/json",
-            status_code=400
+            status_code=400,
+            headers=cors_headers
         )
     
     # Validate each message
@@ -189,32 +198,37 @@ def handle_chat(req_body, requests_remaining, reset_seconds):
             return func.HttpResponse(
                 json.dumps({"error": "Each message must be an object"}),
                 mimetype="application/json",
-                status_code=400
+                status_code=400,
+                headers=cors_headers
             )
         if 'role' not in msg or 'content' not in msg:
             return func.HttpResponse(
                 json.dumps({"error": "Each message must have 'role' and 'content' fields"}),
                 mimetype="application/json",
-                status_code=400
+                status_code=400,
+                headers=cors_headers
             )
         if msg['role'] not in ['user', 'assistant', 'system']:
             return func.HttpResponse(
                 json.dumps({"error": "Invalid message role"}),
                 mimetype="application/json",
-                status_code=400
+                status_code=400,
+                headers=cors_headers
             )
         if not isinstance(msg['content'], str):
             return func.HttpResponse(
                 json.dumps({"error": "Message content must be a string"}),
                 mimetype="application/json",
-                status_code=400
+                status_code=400,
+                headers=cors_headers
             )
         # Only limit length for user messages
         if msg['role'] == 'user' and len(msg['content']) > 1000:
             return func.HttpResponse(
                 json.dumps({"error": "Message content too long"}),
                 mimetype="application/json",
-                status_code=400
+                status_code=400,
+                headers=cors_headers
             )
     
     # Validate assistance level
@@ -223,7 +237,8 @@ def handle_chat(req_body, requests_remaining, reset_seconds):
         return func.HttpResponse(
             json.dumps({"error": "Invalid assistance level"}),
             mimetype="application/json",
-            status_code=400
+            status_code=400,
+            headers=cors_headers
         )
     
     # Get OpenAI configuration
@@ -237,7 +252,8 @@ def handle_chat(req_body, requests_remaining, reset_seconds):
         return func.HttpResponse(
             json.dumps({"error": "OpenAI service is not configured."}),
             mimetype="application/json",
-            status_code=500
+            status_code=500,
+            headers=cors_headers
         )
     
     # Map assistance_level to SYSTEM_PROMPTS key
@@ -260,7 +276,8 @@ def handle_chat(req_body, requests_remaining, reset_seconds):
         return func.HttpResponse(
             json.dumps({"error": "Too many messages in conversation"}),
             mimetype="application/json",
-            status_code=400
+            status_code=400,
+            headers=cors_headers
         )
     
     client = AzureOpenAI(
@@ -292,7 +309,8 @@ def handle_chat(req_body, requests_remaining, reset_seconds):
                 "requests_remaining": requests_remaining,
                 "reset_seconds": reset_seconds
             }),
-            mimetype="application/json"
+            mimetype="application/json",
+            headers=cors_headers
         )
     except Exception as e:
         logging.error("Error calling Azure OpenAI", exc_info=True)
@@ -300,7 +318,8 @@ def handle_chat(req_body, requests_remaining, reset_seconds):
         return func.HttpResponse(
             json.dumps({"error": "Error processing your request with AI assistant"}),
             mimetype="application/json",
-            status_code=500
+            status_code=500,
+            headers=cors_headers
         )
 
 def extract_single_line_of_code(response_text):
@@ -314,14 +333,18 @@ def extract_single_line_of_code(response_text):
             return line
     return code.strip()
 
-def tower_snippet(req: func.HttpRequest, requests_remaining, reset_seconds) -> func.HttpResponse:
+def tower_snippet(req: func.HttpRequest, requests_remaining, reset_seconds, cors_headers) -> func.HttpResponse:
     logging.info('Entered tower_snippet() for NewMethodProxy')
     try:
         req_body = req.get_json()
         logging.warning(f"Parsed request body in tower_snippet: {req_body}")
     except Exception as e:
         logging.error("Failed to parse JSON body in tower_snippet: %s", traceback.format_exc())
-        resp = func.HttpResponse("Please pass a valid JSON object in the request body", status_code=400)
+        resp = func.HttpResponse(
+            "Please pass a valid JSON object in the request body", 
+            status_code=400,
+            headers=cors_headers
+        )
         logging.warning(f"Returning error response in tower_snippet: {resp.get_body()}")
         return resp
     context = req_body.get('context', {})
@@ -329,7 +352,11 @@ def tower_snippet(req: func.HttpRequest, requests_remaining, reset_seconds) -> f
     user_info = req_body.get('userInfo', {})
     if not tower_type or not context:
         logging.error("Missing 'context' or 'towerType' in tower_snippet request body")
-        resp = func.HttpResponse("Please pass 'context' and 'towerType' in the request body", status_code=400)
+        resp = func.HttpResponse(
+            "Please pass 'context' and 'towerType' in the request body", 
+            status_code=400,
+            headers=cors_headers
+        )
         logging.warning(f"Returning error response in tower_snippet: {resp.get_body()}")
         return resp
     simplified_prompt = f"Generate ONLY a single, essential line of code for a {tower_type} in {context.get('language', 'Python')}\n\nCONTEXT:\nProblem: {context.get('problem', {}).get('title') or context.get('problem', {}).get('description') or context.get('problem', 'No problem description available')}\nLanguage: {context.get('language', 'Python')}\nTower Type: {tower_type}\nExisting Code Structure (DO NOT REPEAT CODE FROM HERE):\n```\n{context.get('code', '// No existing code provided')}\n```\n\nREQUIREMENTS FOR THE SINGLE LINE OF CODE:\n- Return EXACTLY ONE LINE of code relevant to the {tower_type}.\n- The line should be the next logical step for this tower type.\n- NO explanations, NO markdown formatting (like ```), NO comments.\n- Use variable names and styles consistent with the existing code if possible, but prioritize a single, correct line.\n- If this is tower number {context.get('towerCount', 1)} of this type, ensure any new variable in this line is named appropriately (e.g., item{context.get('towerCount', 1)}).\n\nSPECIFIC FORMAT FOR THE SINGLE LINE OF {tower_type.upper()}:\n"
@@ -362,7 +389,11 @@ def tower_snippet(req: func.HttpRequest, requests_remaining, reset_seconds) -> f
     AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
     if not (AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY):
         logging.error("OpenAI service is not configured in tower_snippet.")
-        resp = func.HttpResponse("OpenAI service is not configured.", status_code=500)
+        resp = func.HttpResponse(
+            "OpenAI service is not configured.", 
+            status_code=500,
+            headers=cors_headers
+        )
         logging.warning(f"Returning error response in tower_snippet: {resp.get_body()}")
         return resp
     client = AzureOpenAI(
@@ -390,12 +421,13 @@ def tower_snippet(req: func.HttpRequest, requests_remaining, reset_seconds) -> f
                 "requests_remaining": requests_remaining,
                 "reset_seconds": reset_seconds
             }),
-            mimetype="application/json"
+            mimetype="application/json",
+            headers=cors_headers
         )
         logging.warning(f"Returning final response in tower_snippet: {resp.get_body()}")
         return resp
     except Exception as e:
         logging.error("Error calling Azure OpenAI for tower snippet: %s", traceback.format_exc())
-        resp = func.HttpResponse(f"Error processing your request for tower snippet: {str(e)}", status_code=500)
+        resp = func.HttpResponse(f"Error processing your request for tower snippet: {str(e)}", status_code=500, headers=cors_headers)
         logging.warning(f"Returning error response in tower_snippet: {resp.get_body()}")
         return resp 
