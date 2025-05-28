@@ -199,7 +199,8 @@ except Exception as e:
             import sys
             old_stdout = sys.stdout
             sys.stdout = captured_output = io.StringIO()
-            exec(harness_code, globals(), local_scope)
+            # Use the same dict for globals and locals so imports persist
+            exec(harness_code, local_scope, local_scope)
             sys.stdout = old_stdout
             output_str = captured_output.getvalue()
             try:
