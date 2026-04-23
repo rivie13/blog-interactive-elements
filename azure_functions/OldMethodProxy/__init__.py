@@ -142,7 +142,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         response = client.chat.completions.create(
             model=AZURE_OPENAI_DEPLOYMENT_NAME,
             messages=full_messages,
-            max_tokens=800,
+            max_completion_tokens=800,
             temperature=0.7,
             top_p=0.95,
             frequency_penalty=0,
@@ -200,7 +200,7 @@ def tower_snippet(req: func.HttpRequest, requests_remaining, reset_seconds) -> f
         response = client.chat.completions.create(
             model=AZURE_OPENAI_DEPLOYMENT_NAME,
             messages=[SYSTEM_PROMPTS["snippetGeneration"], {"role": "user", "content": user_prompt}],
-            max_tokens=800,
+            max_completion_tokens=800,
             temperature=0.7,
             top_p=0.95,
             frequency_penalty=0,
