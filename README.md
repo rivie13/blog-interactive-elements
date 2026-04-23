@@ -40,4 +40,4 @@ See `docfiles/blog_interactive_elements_detailed_plan.md` for a full technical a
 
 ## Deployment Note
 
-Deployment to Azure Function Apps is **user-managed**. This repository does not include a GitHub Actions workflow or any automated CI/CD pipeline. You must create and maintain your own deployment pipeline (e.g., GitHub Actions, Azure DevOps, or manual zip deploy via the Azure Portal/CLI) to publish updates to your Azure Function App.
+Deployment to Azure Function Apps is **user-managed**. This repository does not include a GitHub Actions workflow or any automated CI/CD pipeline that can be used by other users. You must create and maintain your own deployment pipeline (e.g., GitHub Actions, Azure DevOps, or manual zip deploy via the Azure Portal/CLI) to publish updates to your Azure Function App.
