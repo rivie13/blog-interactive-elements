@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # deployment artifact is built from azure_functions and unzipped at the workspace root
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # deployment artifact contents are extracted here before deploy
   AZURE_FUNCTIONAPP_SOURCE_PATH: 'azure_functions'
   PYTHON_VERSION: '3.12' # set this to the python version to use (supports 3.6, 3.7, 3.8)
 
@@ -37,7 +37,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --target="${{ env.AZURE_FUNCTIONAPP_SOURCE_PATH }}/.python_packages/lib/site-packages" -r ${{ env.AZURE_FUNCTIONAPP_SOURCE_PATH }}/requirements.txt
+          pip install --no-cache-dir --target="${{ env.AZURE_FUNCTIONAPP_SOURCE_PATH }}/.python_packages/lib/site-packages" -r ${{ env.AZURE_FUNCTIONAPP_SOURCE_PATH }}/requirements.txt
 
       # Optional: Add step to run tests here
 
