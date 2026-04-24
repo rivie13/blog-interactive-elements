@@ -37,7 +37,6 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r ${{ env.AZURE_FUNCTIONAPP_SOURCE_PATH }}/requirements.txt
           pip install --target="${{ env.AZURE_FUNCTIONAPP_SOURCE_PATH }}/.python_packages/lib/site-packages" -r ${{ env.AZURE_FUNCTIONAPP_SOURCE_PATH }}/requirements.txt
 
       # Optional: Add step to run tests here
