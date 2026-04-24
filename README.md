@@ -40,4 +40,4 @@ See `docfiles/blog_interactive_elements_detailed_plan.md` for a full technical a
 
 ## Deployment Note
 
-This repository includes a GitHub Actions workflow for deploying the `azure_functions` app to Azure Functions. For Linux-based Python deployments, the workflow enables remote Oryx builds during deployment so packages from `azure_functions/requirements.txt` are installed into the deployed app environment.
+This repository includes a GitHub Actions workflow for deploying the `azure_functions` app to Azure Functions. The workflow installs packages from `azure_functions/requirements.txt` into `azure_functions/.python_packages/lib/site-packages` before creating the deployment artifact so runtime imports such as `azure.data.tables` are available without relying on a remote Oryx build.

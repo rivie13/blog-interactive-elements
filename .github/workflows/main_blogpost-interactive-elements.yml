@@ -11,7 +11,8 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'azure_functions' # set this to the path to your web app project, defaults to the repository root
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # deployment artifact is built from azure_functions and unzipped at the workspace root
+  AZURE_FUNCTIONAPP_SOURCE_PATH: 'azure_functions'
   PYTHON_VERSION: '3.12' # set this to the python version to use (supports 3.6, 3.7, 3.8)
 
 jobs:
@@ -35,12 +36,16 @@ jobs:
           source venv/bin/activate
 
       - name: Install dependencies
-        run: pip install -r azure_functions/requirements.txt
+        run: |
+          pip install -r ${{ env.AZURE_FUNCTIONAPP_SOURCE_PATH }}/requirements.txt
+          pip install --target="${{ env.AZURE_FUNCTIONAPP_SOURCE_PATH }}/.python_packages/lib/site-packages" -r ${{ env.AZURE_FUNCTIONAPP_SOURCE_PATH }}/requirements.txt
 
       # Optional: Add step to run tests here
 
       - name: Zip artifact for deployment
-        run: zip release.zip ./* -r
+        run: |
+          cd ${{ env.AZURE_FUNCTIONAPP_SOURCE_PATH }}
+          zip -r ../release.zip .
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
@@ -82,6 +87,6 @@ jobs:
           app-name: 'blogpost-interactive-elements'
           slot-name: 'Production'
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          scm-do-build-during-deployment: true
-          enable-oryx-build: true
+          scm-do-build-during-deployment: false
+          enable-oryx-build: false
           
