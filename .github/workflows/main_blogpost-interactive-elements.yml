@@ -88,4 +88,3 @@ jobs:
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
           scm-do-build-during-deployment: false
           enable-oryx-build: false
-          
